@@ -63,6 +63,7 @@ struct GameView: View {
                 RoleCard(
                     isImposter: game.myIsImposter,
                     prompt: game.myPrompt,
+                    category: game.myCategory,
                     isRevealed: $roleIsRevealed
                 )
 

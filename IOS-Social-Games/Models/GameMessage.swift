@@ -4,7 +4,7 @@ nonisolated enum GameMessage: Codable, Sendable {
     case join(name: String)
     case playerJoined(GamePlayer)
     case startGame
-    case privateRole(isImposter: Bool, prompt: String?)
+    case privateRole(isImposter: Bool, prompt: String?, category: String)
     case publicState(GameState)
     case submitClue(String)
     case submitVote(accusedID: UUID)
