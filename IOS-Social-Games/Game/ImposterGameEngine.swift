@@ -1,23 +1,27 @@
 import Foundation
 import SwiftUI
+import UIKit
 
 @MainActor
 @Observable
 final class ImposterGameEngine {
     var state = GameState()
+
     var myID = UUID()
     var myName = UIDevice.current.name
     var myIsImposter = false
     var myPrompt: String?
-    
+
     var isHost: Bool {
         state.host?.id == myID
     }
-    
+
     var me: GamePlayer? {
-        state.players.first(where: { $0.id == myId })
+        state.players.first { $0.id == myID }
     }
-    
+
+    // MARK: - Incoming messages
+
     func handle(
         _ message: GameMessage,
         from senderID: UUID?,
@@ -25,43 +29,93 @@ final class ImposterGameEngine {
     ) async {
         switch message {
         case .join(let name):
-            guard isHost else { return }
-            
-            let player = GamePlayer(name: name)
+            guard isHost,
+                  state.phase == .lobby,
+                  let senderID,
+                  !state.players.contains(where: { $0.id == senderID })
+            else {
+                return
+            }
+
+            let player = GamePlayer(
+                id: senderID,
+                name: name
+            )
+
             state.players.append(player)
-            
-            await network.broadcast(.playerJoined(player))
-            await network.broadcast(.publicState(state))
-            
+
+            await broadcastPublicState(network: network)
+
         case .playerJoined(let player):
+            guard !isHost else {
+                return
+            }
+
             if !state.players.contains(where: { $0.id == player.id }) {
                 state.players.append(player)
             }
-            
+
         case .startGame:
-            guard isHost else { return }
-            await startGame(network: network)
-            
+            break
+
         case .privateRole(let isImposter, let prompt):
+            guard !isHost else {
+                return
+            }
+
             myIsImposter = isImposter
             myPrompt = prompt
-        
+
         case .publicState(let newState):
+            guard !isHost else {
+                return
+            }
+
             state = newState
-            
-        case .submitClue(let newState):
-            guard isHost, let senderID else { return }
-            submitClue(playerID: senderID, clue: clue, network: network)
-            
+
+            if newState.phase == .lobby {
+                myIsImposter = false
+                myPrompt = nil
+            }
+
+        case .submitClue(let clue):
+            guard isHost, let senderID else {
+                return
+            }
+
+            submitClue(
+                playerID: senderID,
+                clue: clue,
+                network: network
+            )
+
+        case .submitVote(let accusedID):
+            guard isHost, let senderID else {
+                return
+            }
+
+            submitVote(
+                voterID: senderID,
+                accusedID: accusedID,
+                network: network
+            )
+
         case .reveal:
-            state.phase = .revealing
-            
+            // The host publishes the reveal through publicState.
+            break
+
         case .leave:
+            // Player removal/disconnection handling belongs
+            // in the next networking milestone.
             break
         }
     }
-    
+
+    // MARK: - Hosting
+
     func becomeHost(network: NearbyGameNetwork) {
+        myID = network.localID
+
         state = GameState()
         state.players = [
             GamePlayer(
@@ -70,90 +124,169 @@ final class ImposterGameEngine {
                 isHost: true
             )
         ]
+
+        myIsImposter = false
+        myPrompt = nil
     }
-    
+
+    // MARK: - Starting a round
+
     func startGame(network: NearbyGameNetwork) async {
-        guard state.players.count >= 3 else { return }
-        
-        let imposter = state.players.randomElement();
-        state.imposterID = imposter?.id
-        state.phase = .prompting
+        guard isHost,
+              state.phase == .lobby,
+              state.players.count >= 3,
+              let imposter = state.players.randomElement()
+        else {
+            return
+        }
+
+        state.imposterID = imposter.id
         state.prompt = PromptLibrary.random()
+        state.phase = .prompting
+
         state.clues = [:]
         state.votes = [:]
         state.winner = nil
-        
+
+        for index in state.players.indices {
+            state.players[index].isImposter = false
+            state.players[index].hasSubmittedClue = false
+            state.players[index].hasVoted = false
+        }
+
         for player in state.players {
             let isImposter = player.id == imposter.id
-            let prompt = isImposter ? nil : state.prompt
-            
-            await network.sendToPlayer(
-                .privateRole(isImposter: isImposter, prompt: prompt),
-                playerID: player.id
-            )
+            let prompt: String? = isImposter ? nil : state.prompt
+
+            if player.id == myID {
+                // The host does not send a network message to itself.
+                myIsImposter = isImposter
+                myPrompt = prompt
+            } else {
+                await network.sendToPlayer(
+                    .privateRole(
+                        isImposter: isImposter,
+                        prompt: prompt
+                    ),
+                    playerID: player.id
+                )
+            }
         }
-        
-        await network.broadcast(.publicState(state))
+
+        await broadcastPublicState(network: network)
     }
-    
-    func sumbitClue(
+
+    // MARK: - Clues
+
+    func submitClue(
         playerID: UUID,
         clue: String,
         network: NearbyGameNetwork
     ) {
-        state.clues[playerID] = clue
-        
-        if let index = state.players.firstIndex(where: { $0.id == playerID }) {
-            state.players[index].hasSumbittedClue = true
+        guard isHost,
+              state.phase == .prompting ||
+              state.phase == .discussing
+        else {
+            return
         }
-        
+
+        guard let index = state.players.firstIndex(
+            where: { $0.id == playerID }
+        ) else {
+            return
+        }
+
+        guard state.clues[playerID] == nil else {
+            return
+        }
+
+        let trimmedClue = clue.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+
+        guard !trimmedClue.isEmpty else {
+            return
+        }
+
+        state.clues[playerID] = trimmedClue
+        state.players[index].hasSubmittedClue = true
+
         if state.clues.count == state.players.count {
             state.phase = .voting
         }
-        
-        Task {
-            await network.broadcast(.publicState(state))
-        }
+
+        schedulePublicStateBroadcast(network: network)
     }
-    
+
+    // MARK: - Voting
+
     func submitVote(
         voterID: UUID,
         accusedID: UUID,
         network: NearbyGameNetwork
     ) {
+        guard isHost, state.phase == .voting else {
+            return
+        }
+
+        guard let voterIndex = state.players.firstIndex(
+            where: { $0.id == voterID }
+        ) else {
+            return
+        }
+
+        guard state.players.contains(
+            where: { $0.id == accusedID }
+        ) else {
+            return
+        }
+
+        guard voterID != accusedID,
+              state.votes[voterID] == nil
+        else {
+            return
+        }
+
         state.votes[voterID] = accusedID
-        
-        if let index = state.players.firstIndex(where: { $0.id == voterID }) {
-            state.players[index].hasVoted = true
-        }
-        
+        state.players[voterIndex].hasVoted = true
+
         if state.votes.count == state.players.count {
-            finishRound(network: network)
+            finishRound()
         }
-        
-        Task {
-            await network.broadcast(.publicState(state))
-        }
+
+        schedulePublicStateBroadcast(network: network)
     }
-    
-    private func finshRound(network: NearbyGameNetwork) {
-        guard let imposterID = state.imposterID else { return }
-        
-        let votesForImposter = state.votes.values.filter( $0.id == imposterID).count
-        
-        let civiliansWin = votesForImposter > state.players.count / 2
-        
+
+    private func finishRound() {
+        guard let imposterID = state.imposterID else {
+            return
+        }
+
+        let votesForImposter = state.votes.values.filter {
+            $0 == imposterID
+        }.count
+
+        // This version uses a strict majority.
+        // A tie or no majority means the imposter wins.
+        let civiliansWin =
+            votesForImposter > state.players.count / 2
+
         state.phase = .revealing
-        state.winner = civiliansWin ? "Civillians" : "Imposter"
-        
-        Task {
-            await network.broadcast(.publicState(state))
+        state.winner = civiliansWin ? "Civilians" : "Imposter"
+
+        for index in state.players.indices {
+            state.players[index].isImposter =
+                state.players[index].id == imposterID
         }
     }
-    
-    func resetGame(network: NearbyNetworkGame) {
-        guard isHost else { return }
-        
+
+    // MARK: - Replay
+
+    func resetGame(network: NearbyGameNetwork) {
+        guard isHost else {
+            return
+        }
+
         state.phase = .lobby
         state.prompt = ""
         state.clues = [:]
@@ -161,21 +294,67 @@ final class ImposterGameEngine {
         state.imposterID = nil
         state.winner = nil
         state.round += 1
-        
+
+        myIsImposter = false
+        myPrompt = nil
+
         for index in state.players.indices {
             state.players[index].isImposter = false
-            state.players[index].hasSumbittedClue = false
+            state.players[index].hasSubmittedClue = false
             state.players[index].hasVoted = false
         }
-        
-        Task {
-            await network.broadcast(.publicState(state))
+
+        schedulePublicStateBroadcast(network: network)
+    }
+
+    // MARK: - Public state
+
+    private func makePublicState() -> GameState {
+        var publicState = state
+
+        let isRevealed =
+            state.phase == .revealing ||
+            state.phase == .finished
+
+        if !isRevealed {
+            publicState.prompt = ""
+            publicState.imposterID = nil
+
+            for index in publicState.players.indices {
+                publicState.players[index].isImposter = false
+            }
+
+            // Keep individual choices private until voting ends.
+            publicState.votes = [:]
+        }
+
+        return publicState
+    }
+
+    private func broadcastPublicState(
+        network: NearbyGameNetwork
+    ) async {
+        await network.broadcast(
+            .publicState(makePublicState())
+        )
+    }
+
+    private func schedulePublicStateBroadcast(
+        network: NearbyGameNetwork
+    ) {
+        Task { [weak self] in
+            guard let self else {
+                return
+            }
+
+            await self.broadcastPublicState(network: network)
         }
     }
 }
 
+// MARK: - Prompt library
+
 enum PromptLibrary {
-    // Temp test prompts
     static let prompts = [
         "Beach holiday",
         "Coffee shop",
@@ -188,8 +367,8 @@ enum PromptLibrary {
         "Shopping centre",
         "University lecture"
     ]
-    
+
     static func random() -> String {
-        prompts.randomElement()!
+        prompts.randomElement() ?? "Coffee shop"
     }
 }

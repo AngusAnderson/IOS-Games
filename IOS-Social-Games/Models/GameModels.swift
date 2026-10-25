@@ -1,6 +1,6 @@
 import Foundation
 
-enum GamePhase: String, Codable, Sendable {
+nonisolated enum GamePhase: String, Codable, Sendable {
     case lobby
     case prompting
     case discussing
@@ -9,14 +9,14 @@ enum GamePhase: String, Codable, Sendable {
     case finished
 }
 
-struct GamePlayer: Codable, Identifiable, Hashable, Sendable {
+nonisolated struct GamePlayer: Codable, Identifiable, Hashable, Sendable {
     let id: UUID
     var name: String
     var isHost: Bool
     var isImposter: Bool
-    var hasSumbittedClue: Bool
+    var hasSubmittedClue: Bool
     var hasVoted: Bool
-    
+
     init(
         id: UUID = UUID(),
         name: String,
@@ -29,12 +29,12 @@ struct GamePlayer: Codable, Identifiable, Hashable, Sendable {
         self.name = name
         self.isHost = isHost
         self.isImposter = isImposter
-        self.hasSumbittedClue = hasSubmittedClue
+        self.hasSubmittedClue = hasSubmittedClue
         self.hasVoted = hasVoted
     }
 }
 
-struct GameState: Codable, Sendable {
+nonisolated struct GameState: Codable, Sendable {
     var phase: GamePhase = .lobby
     var players: [GamePlayer] = []
     var prompt: String = ""
@@ -43,11 +43,11 @@ struct GameState: Codable, Sendable {
     var imposterID: UUID?
     var round: Int = 1
     var winner: String?
-    
+
     var host: GamePlayer? {
         players.first(where: \.isHost)
     }
-    
+
     var imposter: GamePlayer? {
         players.first(where: { $0.id == imposterID })
     }

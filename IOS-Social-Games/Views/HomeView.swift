@@ -3,39 +3,65 @@ import SwiftUI
 struct HomeView: View {
     @Environment(ImposterGameEngine.self) private var game
     @Environment(NearbyGameNetwork.self) private var network
-    
-    @State private var playerName = UIDevice.current.name
-    
-    var body: some view {
+
+    @State private var playerName = ""
+    @State private var showingHostLobby = false
+    @State private var showingJoinLobby = false
+
+    private var trimmedName: String {
+        playerName.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+    }
+
+    var body: some View {
         NavigationStack {
             Form {
                 Section("Your name") {
-                    TextField("Name", text:$playerName)
+                    TextField("Enter your name", text: $playerName)
+                        .textInputAutocapitalization(.words)
+                        .autocorrectionDisabled()
                 }
-                
-                section {
-                    NavigationLink("Host a game") {
-                        LobbyView(isHost: true)
+
+                Section {
+                    Button("Host a game") {
+                        preparePlayer()
+                        showingHostLobby = true
                     }
-                    .disabled(playerName.isEmpty)
-                    
-                    NavigationLink("Joing a game") {
-                        LobbyView(isHost: false)
+                    .disabled(trimmedName.isEmpty)
+
+                    Button("Join a game") {
+
+                        preparePlayer()
+                        showingJoinLobby = true
                     }
-                    .disabled(playerName.isEmpty)
+                    .disabled(trimmedName.isEmpty)
                 }
-                
+
                 if let error = network.connectionError {
-                    Section {
+                    Section("Connection error") {
                         Text(error)
                             .foregroundStyle(.red)
                     }
                 }
             }
             .navigationTitle("Imposter")
-            .onAppear {
-                game.myName = playerName
+            .navigationDestination(
+                isPresented: $showingHostLobby
+            ) {
+                LobbyView(isHost: true)
+            }
+            .navigationDestination(
+                isPresented: $showingJoinLobby
+            ) {
+                LobbyView(isHost: false)
             }
         }
+    }
+
+    private func preparePlayer() {
+        game.myName = trimmedName
+        network.localName = trimmedName
+        network.connectionError = nil
     }
 }

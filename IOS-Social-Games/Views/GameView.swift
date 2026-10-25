@@ -50,20 +50,46 @@ struct GameView: View {
                 .textFieldStyle(.roundedBorder)
             
             Button("Submit clue") {
-                Task {
-                    await network.sendToHost(.submitClue(clue))
+                let submittedClue = clue.trimmingCharacters(
+                    in: .whitespacesAndNewlines
+                )
+
+                guard !submittedClue.isEmpty else {
+                    return
+                }
+
+                Task { @MainActor in
+                    if game.isHost {
+                        game.submitClue(
+                            playerID: game.myID,
+                            clue: submittedClue,
+                            network: network
+                        )
+                    } else {
+                        await network.sendToHost(
+                            .submitClue(submittedClue)
+                        )
+                    }
+
                     clue = ""
                 }
             }
             .buttonStyle(.borderedProminent)
-            .disabled(clue.isEmpty || game.me?.hasSumbittedClue == true)
+            .disabled(
+                clue.trimmingCharacters(
+                    in: .whitespacesAndNewlines
+                ).isEmpty ||
+                game.me?.hasSubmittedClue == true
+            )
+            .buttonStyle(.borderedProminent)
+            .disabled(clue.isEmpty || game.me?.hasSubmittedClue == true)
             
             List(game.state.players) { player in
                 HStack {
                     Text(player.name)
                     Spacer()
                     
-                    if player.hasSumbittedClue {
+                    if player.hasSubmittedClue {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundStyle(.green)
                     }
@@ -80,17 +106,26 @@ struct GameView: View {
             List(game.state.players.filter { $0.id != game.myID }) { player in
                 Button {
                     selectedVote = player.id
-                    
-                    Task {
-                        await network.sendToHost(
-                            .submitVote(accusedID: player.id)
-                        )
+
+                    Task { @MainActor in
+                        if game.isHost {
+                            game.submitVote(
+                                voterID: game.myID,
+                                accusedID: player.id,
+                                network: network
+                            )
+                        } else {
+                            await network.sendToHost(
+                                .submitVote(accusedID: player.id)
+                            )
+                        }
                     }
                 } label: {
                     HStack {
                         Text(player.name)
+
                         Spacer()
-                        
+
                         if selectedVote == player.id {
                             Image(systemName: "checkmark")
                         }

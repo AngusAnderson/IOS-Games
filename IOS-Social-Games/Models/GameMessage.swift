@@ -1,6 +1,6 @@
 import Foundation
 
-enum GameMessage: Codable, Sendable {
+nonisolated enum GameMessage: Codable, Sendable {
     case join(name: String)
     case playerJoined(GamePlayer)
     case startGame
