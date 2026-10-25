@@ -454,8 +454,6 @@ final class NearbyGameNetwork {
             return
         }
 
-        // Each packet is a four-byte big-endian length,
-        // followed by JSON.
         while buffer.count >= 4 {
             let length = buffer.prefix(4).reduce(UInt32(0)) {
                 ($0 << 8) | UInt32($1)

@@ -1,0 +1,38 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  width="1024"
+  height="1024"
+  viewBox="0 0 1024 1024"
+>
+  <!-- Warm ivory eye outline -->
+  <path
+    d="
+      M 238 512
+      C 318 412, 410 364, 512 364
+      C 614 364, 706 412, 786 512
+      C 706 612, 614 660, 512 660
+      C 410 660, 318 612, 238 512
+      Z
+    "
+    fill="none"
+    stroke="#E8E0D6"
+    stroke-width="38"
+    stroke-linejoin="round"
+  />
+
+  <!-- Burgundy iris -->
+  <circle
+    cx="512"
+    cy="512"
+    r="91"
+    fill="#7A293B"
+  />
+
+  <!-- Charcoal pupil -->
+  <circle
+    cx="512"
+    cy="512"
+    r="39"
+    fill="#060608"
+  />
+</svg>
