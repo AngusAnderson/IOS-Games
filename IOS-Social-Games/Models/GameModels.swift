@@ -43,6 +43,8 @@ nonisolated struct GameState: Codable, Sendable {
     var imposterID: UUID?
     var round: Int = 1
     var winner: String?
+    var clueMode: ClueMode = .spoken
+    var currentPlayerID: UUID?
 
     var host: GamePlayer? {
         players.first(where: \.isHost)
@@ -51,4 +53,15 @@ nonisolated struct GameState: Codable, Sendable {
     var imposter: GamePlayer? {
         players.first(where: { $0.id == imposterID })
     }
+    
+    var currentPlayer: GamePlayer? {
+        players.first {
+            $0.id == currentPlayerID
+        }
+    }
+}
+
+nonisolated enum ClueMode: String, Codable, Sendable {
+    case spoken
+    case typed
 }

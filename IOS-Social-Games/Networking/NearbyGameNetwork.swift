@@ -593,7 +593,7 @@ final class NearbyGameNetwork {
                 }
 
                 switch message {
-                case .submitClue, .submitVote:
+                case .submitClue, .completeSpokenTurn, .submitVote:
                     onMessage?(message, id)
 
                 case .leave:

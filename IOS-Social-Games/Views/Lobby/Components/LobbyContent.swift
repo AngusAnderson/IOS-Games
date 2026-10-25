@@ -93,6 +93,11 @@ struct LobbyContent: View {
             }
 
             if isHost {
+                
+                if isHost || network.isConnected {
+                    ClueModeSettingsCard()
+                }
+                
                 GameActionButton(
                     title: "Begin the deception",
                     subtitle: "Assign everyone a secret role",

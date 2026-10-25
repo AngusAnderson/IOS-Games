@@ -10,23 +10,47 @@ struct GameView: View {
     @State private var roleIsRevealed = false
     @State private var isSending = false
 
-    private var isVoting: Bool {
-        game.state.phase == .voting
+    private var isMyTurn: Bool {
+        game.state.currentPlayerID == game.myID
     }
 
-    private var completedCount: Int {
+    private var canAct: Bool {
+        game.isHost || network.isConnected
+    }
+
+    private var hasPrivateRole: Bool {
+        game.myCategory != nil
+    }
+
+    private var completedTurns: Int {
         game.state.players.filter {
-            isVoting ? $0.hasVoted : $0.hasSubmittedClue
+            $0.hasSubmittedClue
+        }.count
+    }
+
+    private var completedVotes: Int {
+        game.state.players.filter {
+            $0.hasVoted
         }.count
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            if game.state.phase == .revealing ||
-                game.state.phase == .finished {
+            switch game.state.phase {
+            case .prompting, .discussing:
+                cluePhase
+
+            case .voting:
+                votingPhase
+
+            case .revealing, .finished:
                 ResultsView()
-            } else {
-                roundContent
+
+            case .lobby:
+                GameScreen {
+                    Text("Returning to the gathering…")
+                        .foregroundStyle(GameTheme.muted)
+                }
             }
         }
         .navigationTitle("Round \(game.state.round)")
@@ -39,61 +63,141 @@ struct GameView: View {
         .onChange(of: game.state.phase) { _, _ in
             roleIsRevealed = false
         }
+        .onChange(of: game.state.currentPlayerID) { _, _ in
+            clue = ""
+        }
     }
 
-    private var roundContent: some View {
+    // MARK: - Clue phase
+
+    private var cluePhase: some View {
         GameScreen {
             SectionHeading(
                 title: "Round \(game.state.round)",
-                detail: isVoting ? "Accusations" : "The clues"
+                detail: game.state.clueMode == .spoken
+                    ? "Spoken clues"
+                    : "Written clues"
             )
 
-            if isVoting {
-                clueSummary
+            // Visible to every player, not just the active one.
+            privateRoleSection
 
-                VotingPanel(
+            // Controls appear inside this panel only
+            // when it is this player's turn.
+            ClueTurnPanel(
+                mode: game.state.clueMode,
+                currentPlayer: game.state.currentPlayer,
+                isMyTurn: isMyTurn,
+                hasCompletedTurn:
+                    game.me?.hasSubmittedClue == true,
+                isSending: isSending,
+                clue: $clue,
+                onSubmitTypedClue: submitClue,
+                onCompleteSpokenTurn: completeSpokenTurn
+            )
+            .disabled(!canAct)
+
+            // Show submitted clues during the round,
+            // not just once voting starts.
+            if game.state.clueMode == .typed {
+                ClueHistoryView(
                     players: game.state.players,
-                    currentPlayerID: game.myID,
-                    hasVoted: game.me?.hasVoted == true,
-                    isSending: isSending,
-                    selectedID: $selectedVote,
-                    onConfirm: submitVote
-                )
-            } else {
-                RoleCard(
-                    isImposter: game.myIsImposter,
-                    prompt: game.myPrompt,
-                    category: game.myCategory,
-                    isRevealed: $roleIsRevealed
-                )
-
-                ClueEntryCard(
-                    clue: $clue,
-                    hasSubmitted:
-                        game.me?.hasSubmittedClue == true,
-                    isSending: isSending,
-                    onSubmit: submitClue
+                    clues: game.state.clues
                 )
             }
 
-            progressPanel
+            progressPanel(isVoting: false)
 
-            if let error = network.connectionError {
-                ConnectionErrorCard(message: error)
+            connectionFeedback
+        }
+    }
+
+    // MARK: - Role information
+
+    @ViewBuilder
+    private var privateRoleSection: some View {
+        if hasPrivateRole {
+            RoleCard(
+                isImposter: game.myIsImposter,
+                prompt: game.myPrompt,
+                category: game.myCategory,
+                isRevealed: $roleIsRevealed
+            )
+        } else {
+            GamePanel {
+                HStack(spacing: 12) {
+                    ProgressView()
+                        .tint(GameTheme.accentLight)
+
+                    Text("Waiting for your private role…")
+                        .font(.subheadline)
+                        .foregroundStyle(GameTheme.muted)
+                }
             }
         }
     }
 
-    private var progressPanel: some View {
-        VStack(alignment: .leading, spacing: 14) {
+    // MARK: - Voting phase
+
+    private var votingPhase: some View {
+        GameScreen {
             SectionHeading(
-                title: isVoting ? "Votes sealed" : "Clues sealed",
+                title: "Round \(game.state.round)",
+                detail: "The accusations"
+            )
+
+            if game.state.clueMode == .typed {
+                ClueHistoryView(
+                    players: game.state.players,
+                    clues: game.state.clues
+                )
+            } else {
+                GamePanel {
+                    Text(
+                        "Everyone has spoken. "
+                        + "Think about the clues you heard."
+                    )
+                    .font(.subheadline)
+                    .foregroundStyle(GameTheme.muted)
+                }
+            }
+
+            VotingPanel(
+                players: game.state.players,
+                currentPlayerID: game.myID,
+                hasVoted: game.me?.hasVoted == true,
+                isSending: isSending,
+                selectedID: $selectedVote,
+                onConfirm: submitVote
+            )
+            .disabled(!canAct)
+
+            progressPanel(isVoting: true)
+
+            connectionFeedback
+        }
+    }
+
+    // MARK: - Progress
+
+    private func progressPanel(
+        isVoting: Bool
+    ) -> some View {
+        let completed = isVoting
+            ? completedVotes
+            : completedTurns
+
+        return VStack(alignment: .leading, spacing: 14) {
+            SectionHeading(
+                title: isVoting
+                    ? "Votes sealed"
+                    : "Turns completed",
                 detail:
-                    "\(completedCount) / \(game.state.players.count)"
+                    "\(completed) / \(game.state.players.count)"
             )
 
             ProgressView(
-                value: Double(completedCount),
+                value: Double(completed),
                 total: Double(max(game.state.players.count, 1))
             )
             .tint(GameTheme.accentLight)
@@ -104,6 +208,10 @@ struct GameView: View {
                         PlayerRow(
                             player: player,
                             isYou: player.id == game.myID,
+                            detail: !isVoting &&
+                                player.id == game.state.currentPlayerID
+                                    ? "Has the floor"
+                                    : nil,
                             isComplete: isVoting
                                 ? player.hasVoted
                                 : player.hasSubmittedClue
@@ -114,41 +222,35 @@ struct GameView: View {
         }
     }
 
-    private var clueSummary: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            SectionHeading(title: "What everyone said")
+    // MARK: - Connection feedback
 
-            GamePanel {
-                VStack(alignment: .leading, spacing: 16) {
-                    ForEach(game.state.players) { player in
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text(player.name)
-                                .font(.caption)
-                                .foregroundStyle(GameTheme.muted)
+    @ViewBuilder
+    private var connectionFeedback: some View {
+        if let error = network.connectionError {
+            ConnectionErrorCard(message: error)
+        }
 
-                            Text(game.state.clues[player.id] ?? "—")
-                                .font(
-                                    .system(
-                                        .body,
-                                        design: .serif
-                                    )
-                                )
-                                .foregroundStyle(GameTheme.ivory)
-                        }
-                    }
-                }
-            }
+        if !canAct {
+            Text("You are no longer connected to the host.")
+                .font(.caption)
+                .foregroundStyle(GameTheme.accentLight)
         }
     }
 
-    // MARK: - Actions
+    // MARK: - Typed clue
 
     private func submitClue() {
         let text = clue.trimmingCharacters(
             in: .whitespacesAndNewlines
         )
 
-        guard !text.isEmpty, !isSending else {
+        guard canAct,
+              isMyTurn,
+              !isSending,
+              game.state.clueMode == .typed,
+              game.me?.hasSubmittedClue != true,
+              !text.isEmpty
+        else {
             return
         }
 
@@ -174,8 +276,48 @@ struct GameView: View {
         }
     }
 
+    // MARK: - Spoken turn
+
+    private func completeSpokenTurn() {
+        guard canAct,
+              isMyTurn,
+              !isSending,
+              game.state.clueMode == .spoken,
+              game.me?.hasSubmittedClue != true
+        else {
+            return
+        }
+
+        roleIsRevealed = false
+        isSending = true
+
+        Task { @MainActor in
+            defer {
+                isSending = false
+            }
+
+            if game.isHost {
+                game.completeSpokenTurn(
+                    playerID: game.myID,
+                    network: network
+                )
+            } else {
+                await network.sendToHost(
+                    .completeSpokenTurn
+                )
+            }
+        }
+    }
+
+    // MARK: - Voting
+
     private func submitVote() {
-        guard let selectedVote, !isSending else {
+        guard canAct,
+              let selectedVote,
+              !isSending,
+              game.state.phase == .voting,
+              game.me?.hasVoted != true
+        else {
             return
         }
 
