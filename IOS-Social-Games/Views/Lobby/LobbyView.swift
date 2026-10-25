@@ -33,9 +33,25 @@ struct LobbyView: View {
         }
         .onDisappear {
             network.stopNetworking()
+
             network.onMessage = nil
             network.onAssignedID = nil
+            network.onPlayerDisconnected = nil
+            network.admissionRejection = nil
+
             didStart = false
+        }
+        .onChange(of: network.isConnected) { wasConnected, isConnected in
+            guard !isHost,
+                  wasConnected,
+                  !isConnected
+            else {
+                return
+            }
+
+            game.state = GameState()
+            game.myIsImposter = false
+            game.myPrompt = nil
         }
     }
 
@@ -60,9 +76,27 @@ struct LobbyView: View {
             }
         }
 
+        network.onPlayerDisconnected = { playerID in
+            game.playerDisconnected(
+                playerID: playerID,
+                network: network
+            )
+        }
+
+        network.admissionRejection = { _ in
+            guard game.isHost else {
+                return "The host is not ready."
+            }
+
+            guard game.state.phase == .lobby else {
+                return "This gathering already has a round in progress."
+            }
+
+            return nil
+        }
+
         if isHost {
             game.becomeHost(network: network)
-            network.startHosting()
         } else {
             game.state = GameState()
             network.startBrowsing()

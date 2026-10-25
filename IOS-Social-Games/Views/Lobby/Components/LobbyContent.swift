@@ -5,12 +5,20 @@ struct LobbyContent: View {
     @Environment(NearbyGameNetwork.self) private var network
 
     let isHost: Bool
+    @State private var playerToRemove: GamePlayer?
+    @State private var showingRemovalConfirmation = false
+
+    @State private var selectedHost: NearbyGameNetwork.HostInfo?
 
     private var status: String {
         if isHost {
-            return network.isHosting
-                ? "The room is open"
-                : "Preparing the room…"
+            if network.isHosting {
+                return "The room is open"
+            }
+
+            return network.isPreparingHost
+                ? "Preparing the room…"
+                : "Set the room’s secret"
         }
 
         if network.isConnected {
@@ -37,6 +45,14 @@ struct LobbyContent: View {
                 .font(.subheadline)
                 .foregroundStyle(GameTheme.muted)
 
+            if isHost {
+                if network.isHosting {
+                    HostRoomPasswordCard()
+                } else {
+                    LobbyPasswordSettings()
+                }
+            }
+
             GamePanel {
                 HStack(spacing: 12) {
                     if network.isJoining {
@@ -59,10 +75,18 @@ struct LobbyContent: View {
                 GamePanel {
                     VStack(spacing: 12) {
                         ForEach(game.state.players) { player in
-                            PlayerRow(
+                            LobbyPlayerRow(
                                 player: player,
-                                isYou: player.id == game.myID
-                            )
+                                isYou: player.id == game.myID,
+                                canRemove:
+                                    game.isHost &&
+                                    game.state.phase == .lobby &&
+                                    !player.isHost &&
+                                    player.id != game.myID
+                            ) {
+                                playerToRemove = player
+                                showingRemovalConfirmation = true
+                            }
                         }
                     }
                 }
@@ -107,7 +131,49 @@ struct LobbyContent: View {
         }
         .navigationTitle("The gathering")
         .navigationBarTitleDisplayMode(.inline)
+        .confirmationDialog(
+            "Remove \(playerToRemove?.name ?? "player")?",
+            isPresented: $showingRemovalConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(
+                "Remove from gathering",
+                role: .destructive
+            ) {
+                guard game.isHost,
+                      game.state.phase == .lobby,
+                      let player = playerToRemove,
+                      !player.isHost,
+                      player.id != game.myID
+                else {
+                    return
+                }
+
+                network.removePlayer(player.id)
+                playerToRemove = nil
+            }
+
+            Button("Cancel", role: .cancel) {
+                playerToRemove = nil
+            }
+        } message: {
+            Text(
+                "They will be disconnected. "
+                + "This does not permanently prevent them from joining again."
+            )
+        }
+        .sheet(item: $selectedHost) { host in
+            JoinPasswordSheet(hostName: host.name) { password in
+                Task {
+                    await network.join(
+                        host: host,
+                        password: password
+                    )
+                }
+            }
+        }
     }
+    
 
     private var connectionDescription: String {
         if isHost {
@@ -134,13 +200,11 @@ struct LobbyContent: View {
             ForEach(network.discoveredHosts) { host in
                 GameActionButton(
                     title: host.name,
-                    subtitle: "Enter this gathering",
-                    icon: "door.left.hand.open",
+                    subtitle: "Password-protected gathering",
+                    icon: "lock",
                     isPrimary: false
                 ) {
-                    Task {
-                        await network.join(host: host)
-                    }
+                    selectedHost = host
                 }
                 .disabled(network.isJoining)
             }

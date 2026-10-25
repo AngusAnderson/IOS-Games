@@ -7,7 +7,7 @@
 
     <key>NSBonjourServices</key>
     <array>
-        <string>_imposter-game._tcp</string>
+        <string>_imposter-sec._tcp</string>
     </array>
 </dict>
 </plist>

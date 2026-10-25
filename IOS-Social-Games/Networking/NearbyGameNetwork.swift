@@ -5,7 +5,7 @@ import Observation
 @MainActor
 @Observable
 final class NearbyGameNetwork {
-    static let serviceType = "_imposter-game._tcp"
+    static let serviceType = "_imposter-sec._tcp"
 
     private(set) var localID = UUID()
     var localName: String
@@ -19,6 +19,11 @@ final class NearbyGameNetwork {
 
     var onMessage: ((GameMessage, UUID?) -> Void)?
     var onAssignedID: ((UUID) -> Void)?
+    
+    var onPlayerDisconnected: ((UUID) -> Void)?
+    var admissionRejection: ((String) -> String?)?
+
+    var isPreparingHost = false
 
     @ObservationIgnored
     private var listener: NWListener?
@@ -44,16 +49,19 @@ final class NearbyGameNetwork {
     @ObservationIgnored
     private var sessionID = UUID()
 
+    private(set) var hostedRoomPassword: String?
+
     struct HostInfo: Identifiable, Hashable {
         let id: UUID
         let name: String
         let endpoint: NWEndpoint
     }
 
-    // This is transport metadata, separate from game messages.
     nonisolated private enum Packet: Codable, Sendable {
         case hello(name: String)
         case welcome(playerID: UUID)
+        case rejected(reason: String)
+        case disconnected(reason: DisconnectReason)
         case game(GameMessage)
     }
 
@@ -63,14 +71,42 @@ final class NearbyGameNetwork {
 
     // MARK: - Hosting
 
-    func startHosting() {
+    func startHosting(password: String) async {
+        guard !isPreparingHost, !isHosting else {
+            return
+        }
+
         stopNetworking()
+
         connectionError = nil
+        isPreparingHost = true
 
         let currentSession = sessionID
 
+        hostedRoomPassword = password
+
+        defer {
+            if sessionID == currentSession {
+                isPreparingHost = false
+            }
+        }
+
         do {
-            let listener = try NWListener(using: .tcp)
+            let key = try await Task.detached(
+                priority: .userInitiated
+            ) {
+                try RoomSecurity.deriveKey(from: password)
+            }.value
+
+            guard sessionID == currentSession else {
+                return
+            }
+
+            let parameters = RoomSecurity.makeParameters(key: key)
+
+            let listener = try NWListener(
+                using: parameters
+            )
 
             listener.service = NWListener.Service(
                 name: localName,
@@ -78,9 +114,9 @@ final class NearbyGameNetwork {
             )
 
             listener.stateUpdateHandler = { [weak self] state in
-                Task { @MainActor in
+                Task { @MainActor [weak self] in
                     guard let self,
-                          self.sessionID == currentSession
+                        self.sessionID == currentSession
                     else {
                         return
                     }
@@ -88,7 +124,7 @@ final class NearbyGameNetwork {
                     switch state {
                     case .ready:
                         self.isHosting = true
-                        print("HOST: Listener ready")
+                        print("HOST: Protected listener ready")
 
                     case .failed(let error):
                         self.isHosting = false
@@ -102,9 +138,9 @@ final class NearbyGameNetwork {
             }
 
             listener.newConnectionHandler = { [weak self] connection in
-                Task { @MainActor in
+                Task { @MainActor [weak self] in
                     guard let self,
-                          self.sessionID == currentSession
+                        self.sessionID == currentSession
                     else {
                         connection.cancel()
                         return
@@ -120,9 +156,15 @@ final class NearbyGameNetwork {
             }
 
             self.listener = listener
+
             listener.start(queue: .main)
         } catch {
-            connectionError = "Could not create listener: \(error)"
+            guard sessionID == currentSession else {
+                return
+            }
+
+            connectionError =
+                "Could not create protected room: \(error.localizedDescription)"
         }
     }
 
@@ -197,55 +239,86 @@ final class NearbyGameNetwork {
 
     // MARK: - Joining
 
-    func join(host: HostInfo) async {
+    func join(
+        host: HostInfo,
+        password: String
+    ) async {
         guard !isJoining, !isConnected else {
+            return
+        }
+
+        guard RoomSecurity.isValidPassword(password) else {
+            connectionError = "Use a password of 16–128 characters."
             return
         }
 
         connectionError = nil
         isJoining = true
 
-        // Stop discovery only. Do not stop the entire session.
-        browser?.cancel()
-        browser = nil
-
-        let id = UUID()
         let currentSession = sessionID
 
-        hostConnectionID = id
+        do {
+            let key = try await Task.detached(
+                priority: .userInitiated
+            ) {
+                try RoomSecurity.deriveKey(from: password)
+            }.value
 
-        let connection = NWConnection(
-            to: host.endpoint,
-            using: .tcp
-        )
-
-        attach(
-            connection,
-            id: id,
-            isClient: true,
-            session: currentSession
-        )
-
-        timeoutTask?.cancel()
-
-        timeoutTask = Task { [weak self] in
-            do {
-                try await Task.sleep(for: .seconds(10))
-            } catch {
+            guard sessionID == currentSession else {
                 return
             }
 
-            guard let self,
-                  self.sessionID == currentSession,
-                  self.isJoining
-            else {
-                return
-            }
+            browser?.cancel()
+            browser = nil
 
-            self.close(
-                id,
-                reason: "Joining timed out. Check the host is still in its lobby."
+            let id = UUID()
+
+            hostConnectionID = id
+
+            let connection = NWConnection(
+                to: host.endpoint,
+                using: RoomSecurity.makeParameters(key: key)
             )
+
+            attach(
+                connection,
+                id: id,
+                isClient: true,
+                session: currentSession
+            )
+
+            timeoutTask?.cancel()
+
+            timeoutTask = Task { [weak self] in
+                do {
+                    try await Task.sleep(for: .seconds(10))
+                } catch {
+                    return
+                }
+
+                guard let self,
+                    self.sessionID == currentSession,
+                    self.isJoining
+                else {
+                    return
+                }
+
+                self.close(
+                    id,
+                    reason:
+                        "Could not enter the room. Check the password "
+                        + "and that the host is still available."
+                )
+            }
+        } catch {
+            guard sessionID == currentSession else {
+                return
+            }
+
+            isJoining = false
+
+            connectionError =
+                "Could not prepare connection: \(error.localizedDescription)"
         }
     }
 
@@ -289,9 +362,21 @@ final class NearbyGameNetwork {
                     print("NETWORK: Waiting: \(error)")
 
                 case .failed(let error):
+                    let message: String
+
+                    if isClient {
+                        message =
+                            "Could not establish a protected connection. "
+                            + "Check the room password and host availability. "
+                            + "(\(error))"
+                    } else {
+                        message =
+                            "An incoming protected connection failed: \(error)"
+                    }
+
                     self.close(
                         id,
-                        reason: "Connection failed: \(error)"
+                        reason: message
                     )
 
                 case .cancelled:
@@ -408,26 +493,50 @@ final class NearbyGameNetwork {
         from id: UUID
     ) {
         switch packet {
-        case .hello(let name):
+        case .hello(let suppliedName):
             guard isHosting,
                   !registeredPlayers.contains(id)
             else {
                 return
             }
 
-            let name = name.trimmingCharacters(
+            let name = suppliedName.trimmingCharacters(
                 in: .whitespacesAndNewlines
             )
 
             guard !name.isEmpty, name.count <= 40 else {
-                close(id, reason: "Invalid player name.")
+                send(
+                    .rejected(reason: "Choose a name of 1–40 characters."),
+                    to: id,
+                    closeAfterSending: true
+                )
+                return
+            }
+
+            guard let admissionRejection else {
+                send(
+                    .rejected(reason: "The host is not ready for players."),
+                    to: id,
+                    closeAfterSending: true
+                )
+                return
+            }
+
+            if let reason = admissionRejection(name) {
+                send(
+                    .rejected(reason: reason),
+                    to: id,
+                    closeAfterSending: true
+                )
                 return
             }
 
             registeredPlayers.insert(id)
 
-            // The host chooses the player's ID.
-            send(.welcome(playerID: id), to: id)
+            send(
+                .welcome(playerID: id),
+                to: id
+            )
 
             onMessage?(.join(name: name), id)
 
@@ -440,6 +549,7 @@ final class NearbyGameNetwork {
             }
 
             localID = playerID
+
             isJoining = false
             isConnected = true
 
@@ -450,16 +560,42 @@ final class NearbyGameNetwork {
 
             print("CLIENT: Joined as \(playerID)")
 
+        case .rejected(let reason):
+            guard !isHosting,
+                  id == hostConnectionID
+            else {
+                return
+            }
+
+            close(
+                id,
+                reason: reason
+            )
+
+        case .disconnected(let reason):
+            guard !isHosting,
+                  id == hostConnectionID
+            else {
+                return
+            }
+
+            close(
+                id,
+                reason: reason.message
+            )
+
         case .game(let message):
             if isHosting {
                 guard registeredPlayers.contains(id) else {
                     return
                 }
 
-                // Clients can submit actions, not overwrite state.
                 switch message {
-                case .submitClue, .submitVote, .leave:
+                case .submitClue, .submitVote:
                     onMessage?(message, id)
+
+                case .leave:
+                    close(id, reason: nil)
 
                 default:
                     break
@@ -512,7 +648,8 @@ final class NearbyGameNetwork {
 
     private func send(
         _ packet: Packet,
-        to id: UUID
+        to id: UUID,
+        closeAfterSending: Bool = false
     ) {
         guard let connection = connections[id] else {
             return
@@ -538,26 +675,47 @@ final class NearbyGameNetwork {
             connection.send(
                 content: framed,
                 completion: .contentProcessed { [weak self] error in
-                    guard let error else {
-                        return
-                    }
-
-                    Task { @MainActor in
+                    Task { @MainActor [weak self] in
                         guard let self,
                               self.sessionID == session
                         else {
                             return
                         }
 
-                        self.close(
-                            id,
-                            reason: "Send failed: \(error)"
-                        )
+                        if let error {
+                            self.close(
+                                id,
+                                reason: "Send failed: \(error)"
+                            )
+                        } else if closeAfterSending {
+                            self.close(id, reason: nil)
+                        }
                     }
                 }
             )
+
+            if closeAfterSending {
+                Task { @MainActor [weak self] in
+                    do {
+                        try await Task.sleep(for: .seconds(2))
+                    } catch {
+                        return
+                    }
+
+                    guard let self,
+                          self.sessionID == session
+                    else {
+                        return
+                    }
+
+                    self.close(id, reason: nil)
+                }
+            }
         } catch {
-            close(id, reason: "Could not encode message: \(error)")
+            close(
+                id,
+                reason: "Could not encode message: \(error)"
+            )
         }
     }
 
@@ -573,11 +731,12 @@ final class NearbyGameNetwork {
             return
         }
 
+        let wasRegistered = registeredPlayers.remove(id) != nil
+
         connection.stateUpdateHandler = nil
         connection.cancel()
 
         buffers.removeValue(forKey: id)
-        registeredPlayers.remove(id)
 
         if id == hostConnectionID {
             timeoutTask?.cancel()
@@ -591,10 +750,13 @@ final class NearbyGameNetwork {
         if let reason {
             connectionError = reason
         }
+
+        if isHosting, wasRegistered {
+            onPlayerDisconnected?(id)
+        }
     }
 
     func stopNetworking() {
-        // Ignore callbacks from the previous session.
         sessionID = UUID()
 
         timeoutTask?.cancel()
@@ -605,6 +767,8 @@ final class NearbyGameNetwork {
 
         listener?.cancel()
         listener = nil
+
+        hostedRoomPassword = nil
 
         for connection in connections.values {
             connection.stateUpdateHandler = nil
@@ -618,6 +782,7 @@ final class NearbyGameNetwork {
         hostConnectionID = nil
 
         isHosting = false
+        isPreparingHost = false
         isJoining = false
         isConnected = false
         discoveredHosts = []
@@ -625,5 +790,41 @@ final class NearbyGameNetwork {
 
     private enum TransportError: Error {
         case invalidPacket
+    }
+    
+    // MARK: - Host moderation
+
+    func removePlayer(_ playerID: UUID) {
+        guard isHosting,
+              registeredPlayers.contains(playerID)
+        else {
+            return
+        }
+
+        disconnectPlayer(
+            playerID,
+            reason: .removedByHost
+        )
+    }
+
+    private func disconnectPlayer(
+        _ playerID: UUID,
+        reason: DisconnectReason
+    ) {
+        guard connections[playerID] != nil else {
+            return
+        }
+
+        let wasRegistered = registeredPlayers.remove(playerID) != nil
+
+        if wasRegistered {
+            onPlayerDisconnected?(playerID)
+        }
+
+        send(
+            .disconnected(reason: reason),
+            to: playerID,
+            closeAfterSending: true
+        )
     }
 }
