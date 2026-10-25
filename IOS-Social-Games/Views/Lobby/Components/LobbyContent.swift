@@ -18,11 +18,11 @@ struct LobbyContent: View {
 
             return network.isPreparingHost
                 ? "Preparing the room…"
-                : "Set the room’s secret"
+                : "Set the room's secret"
         }
 
         if network.isConnected {
-            return "You’re in the room"
+            return "You're in the room"
         }
 
         return network.isJoining
@@ -178,13 +178,13 @@ struct LobbyContent: View {
     private var connectionDescription: String {
         if isHost {
             return network.isHosting
-                ? "Advertising on the local network"
+                ? "Visible to nearby players"
                 : "Starting host"
         }
 
         return network.isConnected
             ? "Connected to the host"
-            : "Searching the local network"
+            : "Searching for nearby gatherings"
     }
 
     private var nearbyGames: some View {

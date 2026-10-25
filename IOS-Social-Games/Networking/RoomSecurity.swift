@@ -23,7 +23,7 @@ nonisolated enum RoomSecurity {
         var errorDescription: String? {
             switch self {
             case .invalidPassword:
-                return "Use a password of 4–128 characters."
+                return "Use a password of 4-128 characters."
 
             case .keyDerivationFailed:
                 return "Could not prepare the room security key."
@@ -140,9 +140,13 @@ nonisolated enum RoomSecurity {
             )
         )
 
-        return NWParameters(
+        let parameters = NWParameters(
             tls: tls,
             tcp: NWProtocolTCP.Options()
         )
+
+        parameters.includePeerToPeer = true
+
+        return parameters
     }
 }
