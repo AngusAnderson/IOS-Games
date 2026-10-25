@@ -37,7 +37,7 @@ struct ResultsView: View {
                 Text(
                     imposterWon
                         ? "The imposter fooled the room."
-                        : "The civilians found the imposter."
+                        : "The innocent found the imposter."
                 )
                 .font(.subheadline)
                 .foregroundStyle(GameTheme.muted)
@@ -86,7 +86,7 @@ struct ResultsView: View {
             }
 
             Text(
-                "The civilians needed a strict majority. "
+                "The innocent needed a strict majority. "
                 + "A tie or no majority lets the imposter win."
             )
             .font(.caption)

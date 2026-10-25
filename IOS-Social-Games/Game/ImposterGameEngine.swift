@@ -108,13 +108,20 @@ final class ImposterGameEngine {
             )
 
         case .reveal:
-            // The host publishes the reveal through publicState.
             break
 
         case .leave:
-            // Player removal/disconnection handling belongs
-            // in the next networking milestone.
             break
+            
+        case .completeSpokenTurn:
+            guard isHost, let senderID else {
+                return
+            }
+
+            completeSpokenTurn(
+                playerID: senderID,
+                network: network
+            )
         }
     }
 
@@ -157,6 +164,7 @@ final class ImposterGameEngine {
         state.clues = [:]
         state.votes = [:]
         state.winner = nil
+        state.currentPlayerID = nil
 
         for index in state.players.indices {
             state.players[index].isImposter = false
@@ -164,8 +172,11 @@ final class ImposterGameEngine {
             state.players[index].hasVoted = false
         }
 
+        state.currentPlayerID = state.players.randomElement()?.id
+
         for player in state.players {
             let isImposter = player.id == imposter.id
+
             let privatePrompt: String? = isImposter
                 ? nil
                 : selectedPrompt.text
@@ -199,38 +210,32 @@ final class ImposterGameEngine {
         network: NearbyGameNetwork
     ) {
         guard isHost,
+              state.clueMode == .typed,
               state.phase == .prompting ||
-              state.phase == .discussing
+              state.phase == .discussing,
+              state.currentPlayerID == playerID,
+              let index = state.players.firstIndex(
+                  where: { $0.id == playerID }
+              ),
+              !state.players[index].hasSubmittedClue
         else {
             return
         }
 
-        guard let index = state.players.firstIndex(
-            where: { $0.id == playerID }
-        ) else {
-            return
-        }
-
-        guard state.clues[playerID] == nil else {
-            return
-        }
-
-        let trimmedClue = clue.trimmingCharacters(
+        let text = clue.trimmingCharacters(
             in: .whitespacesAndNewlines
         )
 
-        guard !trimmedClue.isEmpty else {
+        guard !text.isEmpty else {
             return
         }
 
-        state.clues[playerID] = trimmedClue
-        state.players[index].hasSubmittedClue = true
+        state.clues[playerID] = text
 
-        if state.clues.count == state.players.count {
-            state.phase = .voting
-        }
-
-        schedulePublicStateBroadcast(network: network)
+        finishClueTurn(
+            playerIndex: index,
+            network: network
+        )
     }
 
     // MARK: - Voting
@@ -309,6 +314,7 @@ final class ImposterGameEngine {
         state.imposterID = nil
         state.winner = nil
         state.round += 1
+        state.currentPlayerID = nil
 
         myIsImposter = false
         myPrompt = nil
@@ -407,5 +413,67 @@ final class ImposterGameEngine {
         Task { @MainActor in
             await self.broadcastPublicState(network: network)
         }
+    }
+    
+    // MARK: Answer mode changes
+    
+    func setClueMode(
+        _ mode: ClueMode,
+        network: NearbyGameNetwork
+    ) {
+        guard isHost, state.phase == .lobby else {
+            return
+        }
+
+        state.clueMode = mode
+
+        schedulePublicStateBroadcast(network: network)
+    }
+    
+    // MARK: Complete turn
+    
+    func completeSpokenTurn(
+        playerID: UUID,
+        network: NearbyGameNetwork
+    ) {
+        guard isHost,
+              state.clueMode == .spoken,
+              state.phase == .prompting ||
+              state.phase == .discussing,
+              state.currentPlayerID == playerID,
+              let index = state.players.firstIndex(
+                  where: { $0.id == playerID }
+              ),
+              !state.players[index].hasSubmittedClue
+        else {
+            return
+        }
+
+        finishClueTurn(
+            playerIndex: index,
+            network: network
+        )
+    }
+    
+    // MARK: Shared turn
+    
+    private func finishClueTurn(
+        playerIndex: Int,
+        network: NearbyGameNetwork
+    ) {
+        state.players[playerIndex].hasSubmittedClue = true
+
+        let remainingPlayers = state.players.filter {
+            !$0.hasSubmittedClue
+        }
+
+        if let nextPlayer = remainingPlayers.randomElement() {
+            state.currentPlayerID = nextPlayer.id
+        } else {
+            state.currentPlayerID = nil
+            state.phase = .voting
+        }
+
+        schedulePublicStateBroadcast(network: network)
     }
 }

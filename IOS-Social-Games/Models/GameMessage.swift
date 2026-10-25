@@ -10,4 +10,5 @@ nonisolated enum GameMessage: Codable, Sendable {
     case submitVote(accusedID: UUID)
     case reveal
     case leave
+    case completeSpokenTurn
 }
