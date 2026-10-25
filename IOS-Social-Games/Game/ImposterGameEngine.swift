@@ -350,6 +350,48 @@ final class ImposterGameEngine {
             await self.broadcastPublicState(network: network)
         }
     }
+    
+    // MARK: - Membership changes
+
+    func playerDisconnected(
+        playerID: UUID,
+        network: NearbyGameNetwork
+    ) {
+        guard isHost,
+              playerID != myID,
+              state.players.contains(where: { $0.id == playerID })
+        else {
+            return
+        }
+
+        let interruptedRound =
+            state.phase == .prompting ||
+            state.phase == .discussing ||
+            state.phase == .voting
+
+        state.players.removeAll {
+            $0.id == playerID
+        }
+
+        state.clues.removeValue(forKey: playerID)
+
+        state.votes = state.votes.filter { entry in
+            entry.key != playerID && entry.value != playerID
+        }
+
+        if interruptedRound {
+            resetGame(network: network)
+
+            network.connectionError =
+                "A player disconnected. The round was cancelled."
+
+            return
+        }
+
+        Task { @MainActor in
+            await self.broadcastPublicState(network: network)
+        }
+    }
 }
 
 // MARK: - Prompt library
