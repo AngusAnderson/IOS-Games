@@ -1,6 +1,6 @@
 import SwiftUI
 
-@main struct MyApp: App {
+@main struct ImposterGameApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
