@@ -1,9 +1,15 @@
 import SwiftUI
 
-@main struct ImposterGameApp: App {
+@main
+struct ImposterGameApp: App {
+    @State private var game = ImposterGameEngine()
+    @State private var network = NearbyGameNetwork()
+
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            HomeView()
+                .environment(game)
+                .environment(network)
         }
     }
 }

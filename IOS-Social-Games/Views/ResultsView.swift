@@ -23,7 +23,7 @@ struct ResultsView: View {
             List {
                 ForEach(game.state.players) { player in
                     HStack {
-                        text(player.name)
+                        Text(player.name)
                         Spacer()
                         Text("\(votes(for: player.id)) votes")
                     }
