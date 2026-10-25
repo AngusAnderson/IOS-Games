@@ -11,6 +11,7 @@ final class ImposterGameEngine {
     var myName = UIDevice.current.name
     var myIsImposter = false
     var myPrompt: String?
+    var myCategory: String?
 
     var isHost: Bool {
         state.host?.id == myID
@@ -58,13 +59,18 @@ final class ImposterGameEngine {
         case .startGame:
             break
 
-        case .privateRole(let isImposter, let prompt):
+        case .privateRole(
+            let isImposter,
+            let prompt,
+            let category
+        ):
             guard !isHost else {
                 return
             }
 
             myIsImposter = isImposter
             myPrompt = prompt
+            myCategory = category
 
         case .publicState(let newState):
             guard !isHost else {
@@ -76,6 +82,7 @@ final class ImposterGameEngine {
             if newState.phase == .lobby {
                 myIsImposter = false
                 myPrompt = nil
+                myCategory = nil
             }
 
         case .submitClue(let clue):
@@ -127,6 +134,7 @@ final class ImposterGameEngine {
 
         myIsImposter = false
         myPrompt = nil
+        myCategory = nil
     }
 
     // MARK: - Starting a round
@@ -140,8 +148,10 @@ final class ImposterGameEngine {
             return
         }
 
+        let selectedPrompt = PromptLibrary.random()
+
         state.imposterID = imposter.id
-        state.prompt = PromptLibrary.random()
+        state.prompt = selectedPrompt.text
         state.phase = .prompting
 
         state.clues = [:]
@@ -156,17 +166,22 @@ final class ImposterGameEngine {
 
         for player in state.players {
             let isImposter = player.id == imposter.id
-            let prompt: String? = isImposter ? nil : state.prompt
+            let privatePrompt: String? = isImposter
+                ? nil
+                : selectedPrompt.text
+
+            let category = selectedPrompt.category.rawValue
 
             if player.id == myID {
-                // The host does not send a network message to itself.
                 myIsImposter = isImposter
-                myPrompt = prompt
+                myPrompt = privatePrompt
+                myCategory = category
             } else {
                 await network.sendToPlayer(
                     .privateRole(
                         isImposter: isImposter,
-                        prompt: prompt
+                        prompt: privatePrompt,
+                        category: category
                     ),
                     playerID: player.id
                 )
@@ -297,6 +312,7 @@ final class ImposterGameEngine {
 
         myIsImposter = false
         myPrompt = nil
+        myCategory = nil
 
         for index in state.players.indices {
             state.players[index].isImposter = false
@@ -391,26 +407,5 @@ final class ImposterGameEngine {
         Task { @MainActor in
             await self.broadcastPublicState(network: network)
         }
-    }
-}
-
-// MARK: - Prompt library
-
-enum PromptLibrary {
-    static let prompts = [
-        "Beach holiday",
-        "Coffee shop",
-        "Football match",
-        "Guitar practice",
-        "Late-night gaming",
-        "Cooking dinner",
-        "Road trip",
-        "Music festival",
-        "Shopping centre",
-        "University lecture"
-    ]
-
-    static func random() -> String {
-        prompts.randomElement() ?? "Coffee shop"
     }
 }
