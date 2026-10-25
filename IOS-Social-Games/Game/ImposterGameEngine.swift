@@ -286,8 +286,6 @@ final class ImposterGameEngine {
             $0 == imposterID
         }.count
 
-        // This version uses a strict majority.
-        // A tie or no majority means the imposter wins.
         let civiliansWin =
             votesForImposter > state.players.count / 2
 
@@ -346,7 +344,6 @@ final class ImposterGameEngine {
                 publicState.players[index].isImposter = false
             }
 
-            // Keep individual choices private until voting ends.
             publicState.votes = [:]
         }
 

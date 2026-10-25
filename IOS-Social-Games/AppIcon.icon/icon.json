@@ -1,0 +1,38 @@
+{
+  "fill" : {
+    "automatic-gradient" : "display-p3:0.02353,0.02353,0.03137,1.00000"
+  },
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "hidden" : false,
+          "image-name" : "HiddenEye-Eye.svg",
+          "name" : "HiddenEye-Eye"
+        },
+        {
+          "image-name" : "HiddenEye-Diamond.svg",
+          "name" : "HiddenEye-Diamond"
+        },
+        {
+          "image-name" : "HiddenEye-Rings.svg",
+          "name" : "HiddenEye-Rings"
+        }
+      ],
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.3
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "circles" : [
+      "watchOS"
+    ],
+    "squares" : "shared"
+  }
+}

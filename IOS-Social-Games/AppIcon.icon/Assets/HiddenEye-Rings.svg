@@ -1,0 +1,28 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  width="1024"
+  height="1024"
+  viewBox="0 0 1024 1024"
+>
+  <!-- Outer ivory ring -->
+  <circle
+    cx="512"
+    cy="512"
+    r="438"
+    fill="none"
+    stroke="#E8E0D6"
+    stroke-opacity="0.06"
+    stroke-width="7"
+  />
+
+  <!-- Inner dusty-rose ring -->
+  <circle
+    cx="512"
+    cy="512"
+    r="400"
+    fill="none"
+    stroke="#C46E7A"
+    stroke-opacity="0.18"
+    stroke-width="7"
+  />
+</svg>
