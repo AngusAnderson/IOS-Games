@@ -57,7 +57,7 @@ struct HomeView: View {
                     ConnectionErrorCard(message: error)
                 }
 
-                Text("Same local network · 3+ players")
+                Text("Nearby players · 3+ players")
                     .font(.caption)
                     .foregroundStyle(GameTheme.muted)
                     .frame(maxWidth: .infinity)

@@ -75,7 +75,7 @@ struct LobbyPasswordSettings: View {
                 .disabled(network.isPreparingHost)
 
                 Text(
-                    "16–128 characters. "
+                    "4-128 characters. "
                     + "The generated password is recommended."
                 )
                 .font(.caption)

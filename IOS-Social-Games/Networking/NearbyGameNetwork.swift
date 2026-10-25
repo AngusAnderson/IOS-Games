@@ -179,14 +179,16 @@ final class NearbyGameNetwork {
 
         let currentSession = sessionID
 
+        let discoveryParameters = NWParameters.tcp
+        discoveryParameters.includePeerToPeer = true
+
         let browser = NWBrowser(
             for: .bonjour(
                 type: Self.serviceType,
                 domain: nil
             ),
-            using: .tcp
+            using: discoveryParameters
         )
-
         browser.stateUpdateHandler = { [weak self] state in
             Task { @MainActor in
                 guard let self,
